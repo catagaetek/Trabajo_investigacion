@@ -1,0 +1,287 @@
+model Problema2_2
+
+  uses "mmxprs" !solver
+  !uses "mmxnlp" !no lineal
+  options noimplicit !obliga a declarar todo
+
+  !declaraciones
+  declarations
+
+    !se declaran los parametros
+    P_dso, Q_dso: array(1..6) of real
+
+    Pi_g_b, P_g_b_max: array(1..4) of integer
+    Pi_d_b, P_d_b_max: integer
+
+    A_j_n: array(1..9,1..10) of integer
+    H_n_g: array(1..10,1..4) of integer
+    H_n_d, H_sub_n, L_p_n, L_q_n: array(1..10) of integer
+    r_j, x_j, U_min, U_max, Pl_max, Ql_max: real
+
+    !se declaran las variables para restricciones
+    P_g_b, Phi_g: array(1..4) of mpvar
+    P_d_b, Phi_d: mpvar
+    Pl_j, Ql_j: array(1..9) of mpvar
+    U_n: array(1..10) of mpvar
+
+    !se declara la funcion objetivo lineal
+    objetivo:linctr
+    FO: real
+
+    !se declaran las restricciones
+    balance_p, balance_q, tension_min, tension_max: array(1..10) of linctr
+    !balance_q: array(1..10) of nlctr
+    limite_pmin_g, limite_pmax_g: array(1..4) of linctr
+    limite_pmin_d, limite_pmax_d: linctr
+    P_max, P_min, Q_max, Q_min, nat_P, nat_Q: array(1..9) of linctr
+    tension: array(1..10,1..10,1..9) of linctr
+
+    !se declaran valores de soluciones
+    P_g_b_sol: array(1..4) of real
+    P_d_b_sol: real
+    U_n_sol: array(1..10) of real
+    Pl_j_sol, Ql_j_sol: array(1..9) of real
+
+  end-declarations
+
+  !lectura desde excel
+  initialisations from 'mmsheet.xlsx:'+'Problema2_2.xlsx'
+
+    P_dso as "noindex;P_dso" !potencia activa total ofertada por el DSO [MW]
+    Q_dso as "noindex;Q_dso" !potencia reactiva total ofertada por el DSO [MVAr]
+
+    Pi_g_b as "noindex;Pi_g_b" !precio de la energia de agregadores de generacion [$/MWh]
+    Pi_d_b as "noindex;Pi_d_b" !precio de la energia de agregadores con respuesta a la demanda [$/MWh]
+
+    P_g_b_max as "noindex;P_g_b_max" !potencia activa maxima de agregadores de generacion [MW]
+    P_d_b_max as "noindex;P_d_b_max" !potencia activa maxima de agregadores con respuesta a la demanda [MW]
+
+    A_j_n as "noindex;A_j_n" !incidencia entre lineas j y nodos n
+    H_n_g as "noindex;H_n_g" !incidencia entre nodos n y agregadores de generacion
+    H_n_d as "noindex;H_n_d" !incidencia entre nodos n y agregadores con respuesta a la demanda
+    H_sub_n as "noindex;H_sub_n" !incidencia entre subestaciones y nodos n
+
+    L_p_n as "noindex;L_p_n" !potencia activa de la carga del nodo n [MW]
+    L_q_n as "noindex;L_q_n" !potencia reactiva de la carga del nodo n [MVAr]
+
+    r_j as "noindex;r_j" !resistencia de la linea j [Ohm]
+    x_j as "noindex;x_j" !reactancia de la linea j [Ohm]
+
+    U_min as "noindex;U_min" !cuadrado del voltaje minimo [(kV)^2]
+    U_max as "noindex;U_max" !cuadrado del voltaje maximo [(kV)^2]
+
+    Pl_max as "noindex;Pl_max" !limite de transmision potencia activa por lineas [MW]
+    Ql_max as "noindex;Ql_max" !limite de transmision potencia reactiva por lineas [MVAr]
+
+  end-initialisations
+
+  !por cada valor del P_dso
+  forall(i in 1..6) do
+  !forall(i in 1..1) do
+    !naturaleza variables
+
+
+    !funcion objetivo
+    objetivo:= sum(g in 1..4)(P_g_b(g)*Pi_g_b(g))-(P_d_b*Pi_d_b)
+
+    !restricciones
+    !por cada nodo
+    forall(n in 1..10) do
+
+      !potencia activa
+      balance_p(n):= (H_n_d(n)*P_d_b)+(H_sub_n(n)*P_dso(i))-sum(g in 1..4)(H_n_g(n,g)*P_g_b(g))+sum(j in 1..9)(Pl_j(j)*A_j_n(j,n)) = 0
+
+      !potencia reactiva
+      !balance_q(n):= (H_n_d(n)*P_d_b*(sin(Phi_d)/cos(Phi_d)))+(H_sub_n(n)*Q_dso(i))+(L_q_n(n))-sum(g in 1..4)(H_n_g(n,g)*P_g_b(g)*(sin(Phi_g)/cos(Phi_g)))+sum(j in 1..9)(Ql_j(j)*A_j_n(j,n)) = 0
+      !balance_q(n):= (H_n_d(n)*P_d_b*Phi_d)+(H_sub_n(n)*Q_dso(i))+(L_q_n(n))-sum(g in 1..4)(H_n_g(n,g)*P_g_b(g)*Phi_g(g))+sum(j in 1..9)(Ql_j(j)*A_j_n(j,n)) = 0
+
+      !limite tension
+      tension_min(n):= U_n(n) >= U_min
+      tension_max(n):= U_n(n) <= U_max
+
+      forall(m in 1..10) do !por cada par de nodos
+
+        forall(j in 1..9) do!por cada linea
+
+          !valor tension
+          if A_j_n(j,n) = 1 and A_j_n(j,m) = 1 then !si los nodos n y m se unen por la linea j
+            tension(n,m,j):= U_n(m) = U_n(n) - 2*(r_j*Pl_j(j)+x_j*Ql_j(j)) !se calcula la tension en los nodos
+          end-if
+
+        end-do
+
+      end-do
+
+    end-do
+
+    !agregadores de generacion
+    forall(g in 1..4) do
+
+      !limites potencia activa
+      limite_pmin_g(g):= P_g_b(g) >= 0
+      limite_pmax_g(g):= P_g_b(g) <= P_g_b_max(g)
+
+    end-do
+
+    !limites potencia activa agregadores con respuesta a la demanda
+    limite_pmin_d:= P_d_b >= 0
+    limite_pmax_d:= P_d_b <= P_d_b_max
+
+    !limites de flujo
+    forall(j in 1..9) do
+
+      !potencia activa
+      P_max(j):= Pl_j(j) <= Pl_max
+      P_min(j):= Pl_j(j) >= -Pl_max
+
+      !potencia reactiva
+      Q_max(j):= Ql_j(j) <= Ql_max
+      Q_min(j):= Ql_j(j) >= -Ql_max
+
+      !naturaleza variables (valores negativos)
+      nat_P(j):= Pl_j(j) is_free
+      nat_Q(j):= Ql_j(j) is_free
+
+    end-do
+
+    !se minimiza la funcion objetivo
+    minimise(objetivo)
+
+    !valores a imprimir
+
+    !valor funcion objetivo
+    FO:= getobjval
+
+    !agregadores generacion
+    forall(g in 1..4) do
+
+      !potencia agregadores generacion
+      P_g_b_sol(g):= P_g_b(g).sol
+
+      !fase agregadores generacion
+      !Phi_g_sol(g):= Phi_g(g).sol
+
+    end-do
+
+    !potencia agregador con respuesta a la demanda
+    P_d_b_sol:= P_d_b.sol
+
+    !fase agregador con respuesta a la demanda
+    !Phi_d_sol:= Phi_d.sol
+
+    !por cada nodo
+    forall(n in 1..10) do
+
+      !tension en los nodos
+      U_n_sol(n):= U_n(n).sol
+
+    end-do
+
+    !por cada linea
+    forall(j in 1..9) do
+
+      !potencia activa por las lineas
+      Pl_j_sol(j):= Pl_j(j).sol
+
+      !potencia reactiva por las lineas
+      Ql_j_sol(j):= Ql_j(j).sol
+
+    end-do
+
+    !imprimir valores obtenidos
+    writeln("")
+    writeln("Valor de costos es: ", FO)
+    writeln("Valor de potencia del dso es: ", P_dso(i))
+    writeln("Potencia agregadores generacion: ", P_g_b_sol)
+    writeln("Potencia agregadores con respuesta a la demanda: ", P_d_b_sol)
+    writeln("Tensiones en los nodos: ", U_n_sol)
+    !writeln("Fase en los agregadores generacion: ", )
+    !writeln("Fase en los agregadores con respuesta a la demanda: ", )
+    writeln("Flujos potencia activa por las lineas: ", Pl_j_sol)
+    writeln("Flujos potencia reactiva por las lineas: ", Ql_j_sol)
+
+    !escritura a excel
+    !casos de Pdso
+    if i = 1 then !Si Pdso 1
+      initialisations to 'mmsheet.xlsx:'+'Problema2_2.xlsx'
+        FO as "noindex;costo_1"
+        !P_dso(i) as "noindex;Pdso_1"
+        P_g_b_sol as "noindex;P_g_b_1"
+        P_d_b_sol as "noindex;P_d_b_1"
+        U_n_sol as "noindex;U_n_1"
+        !Phi_g_sol as "noindex;Phi_g_1"
+        !Phi_d_sol as "noindex;Phi_d_1"
+        Pl_j_sol as "noindex;Pl_j_1"
+        Ql_j_sol as "noindex;Ql_j_1"
+      end-initialisations
+
+    elif i = 2 then !Si Pdso 2
+      initialisations to 'mmsheet.xlsx:'+'Problema2_2.xlsx'
+        FO as "noindex;costo_2"
+        !P_dso(i) as "noindex;Pdso_2"
+        P_g_b_sol as "noindex;P_g_b_2"
+        P_d_b_sol as "noindex;P_d_b_2"
+        U_n_sol as "noindex;U_n_2"
+        !Phi_g_sol as "noindex;Phi_g_2"
+        !Phi_d_sol as "noindex;Phi_d_2"
+        Pl_j_sol as "noindex;Pl_j_2"
+        Ql_j_sol as "noindex;Ql_j_2"
+      end-initialisations
+
+    elif i = 3 then !Si Pdso 3
+      initialisations to 'mmsheet.xlsx:'+'Problema2_2.xlsx'
+        FO as "noindex;costo_3"
+        !P_dso(i) as "noindex;Pdso_3"
+        P_g_b_sol as "noindex;P_g_b_3"
+        P_d_b_sol as "noindex;P_d_b_3"
+        U_n_sol as "noindex;U_n_3"
+        !Phi_g_sol as "noindex;Phi_g_3"
+        !Phi_d_sol as "noindex;Phi_d_3"
+        Pl_j_sol as "noindex;Pl_j_3"
+        Ql_j_sol as "noindex;Ql_j_3"
+      end-initialisations
+
+    elif i = 4 then !Si Pdso 4
+      initialisations to 'mmsheet.xlsx:'+'Problema2_2.xlsx'
+        FO as "noindex;costo_4"
+        !P_dso(i) as "noindex;Pdso_4"
+        P_g_b_sol as "noindex;P_g_b_4"
+        P_d_b_sol as "noindex;P_d_b_4"
+        U_n_sol as "noindex;U_n_4"
+        !Phi_g_sol as "noindex;Phi_g_4"
+        !Phi_d_sol as "noindex;Phi_d_4"
+        Pl_j_sol as "noindex;Pl_j_4"
+        Ql_j_sol as "noindex;Ql_j_4"
+      end-initialisations
+
+    elif i = 5 then !Si Pdso 5
+      initialisations to 'mmsheet.xlsx:'+'Problema2_2.xlsx'
+        FO as "noindex;costo_5"
+        !P_dso(i) as "noindex;Pdso_5"
+        P_g_b_sol as "noindex;P_g_b_5"
+        P_d_b_sol as "noindex;P_d_b_5"
+        U_n_sol as "noindex;U_n_5"
+        !Phi_g_sol as "noindex;Phi_g_5"
+        !Phi_d_sol as "noindex;Phi_d_5"
+        Pl_j_sol as "noindex;Pl_j_5"
+        Ql_j_sol as "noindex;Ql_j_5"
+      end-initialisations
+
+    elif i = 6 then !Si Pdso 6
+      initialisations to 'mmsheet.xlsx:'+'Problema2_2.xlsx'
+        FO as "noindex;costo_6"
+        !P_dso(i) as "noindex;Pdso_6"
+        P_g_b_sol as "noindex;P_g_b_6"
+        P_d_b_sol as "noindex;P_d_b_6"
+        U_n_sol as "noindex;U_n_6"
+        !Phi_g_sol as "noindex;Phi_g_6"
+        !Phi_d_sol as "noindex;Phi_d_6"
+        Pl_j_sol as "noindex;Pl_j_6"
+        Ql_j_sol as "noindex;Ql_j_6"
+      end-initialisations
+
+    end-if
+
+  end-do
+
+end-model
